@@ -23,6 +23,7 @@ import (
 	"github.com/IceWhaleTech/CasaOS-MessageBus/codegen"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/common"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/config"
+	"github.com/IceWhaleTech/CasaOS-MessageBus/pkg/gatewayclient"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/repository"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/route"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/service"
@@ -136,7 +137,7 @@ func main() {
 	apiPath := strings.TrimRight(u.Path, "/")
 	apiPaths := []string{apiPath, "/doc" + apiPath}
 
-	gatewayManagement, err := external.NewManagementService(config.CommonInfo.RuntimePath)
+	gatewayManagement, err := gatewayclient.New(config.CommonInfo.RuntimePath)
 	if err != nil {
 		panic(err)
 	}
