@@ -2,6 +2,7 @@ package route
 
 import (
 	"crypto/ecdsa"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/IceWhaleTech/CasaOS-Common/utils/jwt"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/codegen"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/config"
+	"github.com/IceWhaleTech/CasaOS-MessageBus/pkg/gatewayclient"
 	"github.com/IceWhaleTech/CasaOS-MessageBus/service"
 	"github.com/deepmap/oapi-codegen/pkg/middleware"
 	"github.com/getkin/kin-openapi/openapi3"
@@ -39,15 +41,26 @@ func NewAPIRouter(swagger *openapi3.T, services *service.Services) (http.Handler
 
 	e.Use(echo_middleware.JWTWithConfig(echo_middleware.JWTConfig{
 		Skipper: func(c echo.Context) bool {
-			// skip when source is unix socket
-			if c.Request().Host == "unix" {
+			// skip when the request really arrived on the unix socket listener
+			if fromUnixSocket(c.Request()) {
 				return true
 			}
 
-			if c.RealIP() == "::1" || c.RealIP() == "127.0.0.1" {
+			// loopback ≠ identity: in-stack callers also present the gateway service credential
+			if (c.RealIP() == "::1" || c.RealIP() == "127.0.0.1") &&
+				gatewayclient.ServiceAuthorizationMatches(config.CommonInfo.RuntimePath, c.Request().Header.Get(echo.HeaderAuthorization)) {
 				return true
 			}
 
+			// a browser's WebSocket subscription with a one-use ticket (ticket.go)
+			if isSubscriptionHandshake(c) {
+				if userID, ok := subscriptionTickets.consume(c.Request()); ok {
+					c.Request().Header.Set("user_id", userID)
+					return true
+				}
+			}
+
+			// TODO(tickets): removed once the dashboard sends a ticket
 			if c.Request().Method == echo.GET && c.Request().Header.Get(echo.HeaderUpgrade) == "websocket" {
 				return true
 			}
@@ -81,6 +94,13 @@ func NewAPIRouter(swagger *openapi3.T, services *service.Services) (http.Handler
 	codegen.RegisterHandlersWithBaseURL(e, apiRoute, apiPath)
 
 	return e, nil
+}
+
+// fromUnixSocket: request arrived on the unix listener (root-only, main.go).
+// From the connection, not the Host header (client-chosen, forwarded by the gateway).
+func fromUnixSocket(r *http.Request) bool {
+	addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	return ok && addr.Network() == "unix"
 }
 
 func NewDocRouter(swagger *openapi3.T, docHTML string, docYAML string) (http.Handler, error) {
